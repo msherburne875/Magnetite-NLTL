@@ -1,0 +1,573 @@
+import os
+import pandas as pd
+import numpy as np
+import matplotlib . gridspec as gridspec
+import matplotlib . pyplot as plt
+import re
+import scipy . stats as stats
+from collections import defaultdict
+from scipy .fft import fft , fftfreq
+from scipy . integrate import cumulative_trapezoid
+from scipy . interpolate import interp1d
+from scipy . signal import savgol_filter
+from scipy . signal import welch
+from scipy . stats import describe
+def signalProcessing ( filePath , time_window = None ):
+’’’
+The goal of this function is to capture the main parameters of
+the recorded signal , including parameters such as Record
+Length , Sample Interval , Trigger Point , Trigger Time ,
+Horizontal Offset and FastFrame Count , reported by default in
+the Tektronix DPO 71254 C Oscilloscope . This information is
+stored in the dictionary Parameters Then , the time and
+amplitude vectors are separated in two different dataframes (
+time and amplitude ), where each column stores the amplitude
+and time vectors for each shot . Subsequently , the amplitude
+is compensated to represent the actual signal .
+Then , the waveform is splitted at the maximum amplitude and the
+left segment is used to determine the time at 10% and 90% of
+the amplitude , after the DC offset is removed from the signal
+. This is the input for the calculate_risetime function .
+Finally , the spectral content of the time domain signal is
+calculated through the welch function , where the sampling
+frequency is set to 1ts and the number of samples per segment
+is 128. The spectrum and frequency information is stored in
+the dictionary spectrum .
+The function returns the dictionary parameters and spectrum , as
+well as the dataframes amplitude , time , and risetime .
+’’’
+data = pd. read_csv ( filePath , header = None , low_memory = False )
+parameters = {
+" Record ␣ Length ": int( data . iloc [0, 1]) ,
+" Sample ␣ Interval ": float ( data . iloc [1, 1]) ,
+" Trigger ␣ Point ": int( data . iloc [2, 1]) ,
+" Trigger ␣ Time ": float ( data . iloc [3, 1]) ,
+" Horizontal ␣ Offset ": float ( data . iloc [5, 1]) ,
+" FastFrame ␣ Count ": int( data . iloc [6, 1])
+}
+time = pd. DataFrame ( data . iloc [:, 3]. values . reshape ( parameters ["
+FastFrame ␣ Count "], parameters [" Record ␣ Length "]).T)
+amplitude = pd. DataFrame ( data . iloc [:, 4]. values . reshape (
+parameters [" FastFrame ␣ Count "], parameters [" Record ␣ Length "]).T
+)
+if ’Ch1 ’ in filePath :
+amplitude = pd. DataFrame ( cumulative_trapezoid ( amplitude - np.
+mean ( amplitude ), time , dx = parameters [" Sample ␣ Interval "],
+axis =0, initial = 0) *76128047281274.601152913377134275)
+elif ’Ch2 ’ in filePath :
+amplitude = pd. DataFrame ( amplitude . values *3981)
+if time_window :
+start_time , end_time = time_window
+mask = ( time >= start_time ) & ( time <= end_time )
+time = time [ mask ]
+amplitude = amplitude [ mask ]
+time . dropna ( inplace = True )
+amplitude . dropna ( inplace = True )
+time = time . reset_index ( drop = True )
+amplitude = amplitude . reset_index ( drop = True )
+for column in amplitude . columns :
+start_idx = np. where ( amplitude [ column ] >= 1 * np.max( amplitude
+[ column ])) [0][0]
+time [ column ] = time [ column ] - time [ column ][ start_idx ]
+riseTime = [ calculate_risetime ( amplitude [i], time [i]) for i in
+range ( parameters [" FastFrame ␣ Count "])]
+spectrum = {}
+spectrum [" freqs " ]=[]
+spectrum ["psd" ]=[]
+for i in range ( amplitude . shape [1]) :
+x = amplitude . iloc [:, i]. to_numpy ()
+freqs , psd = welch (x, fs =1.0/ parameters [" Sample ␣ Interval "],
+nperseg =128)
+spectrum [" freqs "]. append ( freqs )
+spectrum ["psd"]. append (10 * np. log10 (psd))
+return {
+" parameters ": parameters ,
+" amplitude ": amplitude ,
+" time ": time ,
+" riseTime ": riseTime ,
+" spectrum ": spectrum
+}
+def calculate_risetime (signal , time_vector ):
+’’’
+This function takes the left segment of every signal ( amplitude
+and time vectors ) and then applies a linear interpolation .
+Subsequently , it reconstructs the time vector for the new
+dataset and then obtains the difference between the points
+with the closest amplitudes to 10% and 90%. The function
+returns the risetime for each input group .
+’’’
+max_idx = np. argmax ( signal )
+signal = signal [: max_idx + 1]
+time_vector = time_vector [: max_idx + 1]
+signal = signal - np. min ( signal )
+interp_factor = 20
+num_interp_points = len( time_vector ) * interp_factor
+new_time_grid = np. linspace ( time_vector .min () , time_vector .max ()
+, num= num_interp_points )
+interp_func = interp1d ( time_vector , signal , kind =’linear ’,
+fill_value =" extrapolate ")
+interpolated_signal = interp_func ( new_time_grid )
+max_value = np.max( interpolated_signal )
+start_idx = np. where ( interpolated_signal <= 0.1 * max_value )
+[0][ -1]
+end_idx = np. where ( interpolated_signal >= 0.9 * max_value ) [0][0]
+return new_time_grid [ end_idx ] - new_time_grid [ start_idx ]
+def signalPlotting ( dataSet , fileName ):
+’’’
+This function applies a Savitzky - Golay filter through the
+function savgol_fitler with a window length of 50 and a
+polinomial order of 2, then plotting the average of each time
+domain signal set. Additionally it includes the main
+statistics representing the entire dataset measured per test .
+’’’
+fig , axs = plt . subplots (1, 2, figsize =(14 , 6))
+for i in dataSet [" amplitude "]. columns :
+dataSet [" amplitude "][i] = savgol_filter ( dataSet [" amplitude "
+][i], 50, 2)
+dataSet [" amplitude "][i] = dataSet [" amplitude "][i] - min (
+dataSet [" amplitude "][i ][0:100])
+axs [0]. plot ( dataSet [" time "][ len( dataSet [" time "]. columns ) //2]/1e
+-9, dataSet [" amplitude "][ len ( dataSet [" time "]. columns )//2] , ’k
+--’)
+axs [0]. set_xlabel (’Time ␣(ns)’)
+axs [0]. set_ylabel (’Amplitude ␣(V)’)
+axs [0]. set_xlim ( -2 ,8)
+axs [0]. set_ylim ( bottom =0)
+axs [0]. set_title (" Time ␣ domain ")
+axs [0]. grid ( True )
+riseTime_stats = describe (np. array ( dataSet [" riseTime "]) /1e -12)
+amplitude_stats = describe (np. array ( dataSet [" amplitude "]. max(
+axis =0) ))
+print ( amplitude_stats )
+stats_text = (
+f" number ␣of␣ shots :␣{ riseTime_stats . nobs }\n"
+f"min␣ rise ␣ time ␣(ps):␣{ riseTime_stats . minmax [0]:.5}\ n"
+f"max␣ rise ␣ time ␣(ps):␣{ riseTime_stats . minmax [1]:.5}\ n"
+f" mean ␣ rise ␣ time ␣(ps):␣{ riseTime_stats . mean :.5}\ n"
+f" variance ␣($\\ mathrm {{ ps }}^2 $):␣{ riseTime_stats . variance
+:.2}\ n"
+f" skewness :␣{ riseTime_stats . skewness :.2}\ n"
+f" kurtosis :␣{ riseTime_stats . kurtosis :.2} "
+)
+axs [0]. text (
+0.95 , 0.95 , stats_text ,
+transform =axs [0]. transAxes ,
+fontsize =10 ,
+verticalalignment =’top ’,
+horizontalalignment =’right ’,
+bbox = dict ( facecolor =’white ’, alpha =0.8 , edgecolor =’black ’)
+)
+axs [1]. semilogx ( dataSet [" spectrum "][" freqs "][ len( dataSet ["
+spectrum "][" freqs "]) //2] , dataSet [" spectrum "]["psd"][ len(
+dataSet [" spectrum "]["psd "]) //2] , ’k--’)
+axs [1]. set_xlabel (’Frequency ’)
+axs [1]. set_ylabel (’PSD␣(dB)’)
+axs [1]. set_title (f’Welch ␣ Spectrum ’)
+axs [1]. set_xlim ( left = 1E9 , right = 10 E9)
+axs [1]. grid (True , which =" both ", ls="-")
+plt . suptitle ( fileName . replace (’.csv ’, ’’))
+print ( fileName , "␣Max:", np.max( dataSet [" amplitude "]. mean ( axis
+=1)))
+plt . savefig (’/ content / drive / MyDrive / Colab ␣ Notebooks /UNM/ NLTL /01.
+␣ Data /’ + fileName + ’.png ’, dpi = 300)
+plt . show ()
+return {
+’file ’: fileName ,
+’ min_risetime ’: riseTime_stats . minmax [0] ,
+’ max_risetime ’: riseTime_stats . minmax [1] ,
+’ mean_risetime ’: riseTime_stats .mean ,
+’ variance_risetime ’: riseTime_stats . variance ,
+’ skewness_risetime ’: riseTime_stats . skewness ,
+’ kurtosis_risetime ’: riseTime_stats . kurtosis ,
+’ min_amplitude ’: amplitude_stats . minmax [0] ,
+’ max_amplitude ’: amplitude_stats . minmax [1] ,
+’ mean_amplitude ’: amplitude_stats .mean ,
+’ variance_amplitude ’: amplitude_stats . variance ,
+’ skewness_amplitude ’: amplitude_stats . skewness ,
+’ kurtosis_amplitude ’: amplitude_stats . kurtosis ,
+}
+def riseTimesPlot ( dataSet_1 , dataSet_2 , fileName ):
+’’’
+This function plots the rise time of each shot in a dataset .
+This will allow to see the trend in the captured data ,
+identifying particular trends between shots that would
+compromise the analysis . In that sense , te inputs are two
+datasets that are captured for each test (Ch1 measuring the
+input , and Ch2 measuring the output ). Then , plots the
+risetime for each waveform present in the dataset and
+calculates the corresponding mean , median and standard
+deviation .
+’’’
+fig , axs = plt . subplots (1, 2, figsize =(14 , 6))
+# Ch1 rise times
+axs [0]. scatter ( range (len( dataSet_1 [’riseTime ’])), np. array (
+dataSet_1 [’riseTime ’], dtype = float )*1 E12)
+axs [0]. set_xlabel (’Number ␣of␣ shots ’)
+axs [0]. set_ylabel (’Time ␣(ps)’)
+axs [0]. set_title (" Rise ␣ times ␣-␣ DDot ")
+axs [0]. set_xlim ( left = 0, right = len( dataSet_1 [’riseTime ’]))
+axs [0]. set_ylim (0, 2E3)
+axs [0]. grid ( True )
+# Calculate statistics for Ch1
+mean_ch1 = np. mean ( dataSet_1 [’riseTime ’]) *1 E12
+median_ch1 = np. median ( dataSet_1 [’riseTime ’]) *1 E12
+std_ch1 = np.std ( dataSet_1 [’riseTime ’]) *1 E12
+# Summary box for Ch1
+summary_ch1 = f’Mean :␣{ mean_ch1 :.2f}␣ps\ nMedian :␣{ median_ch1 :.2f
+}␣ps\ nStd ␣Dev:␣{ std_ch1 :.2f}␣ps ’
+axs [0]. text (0.05 , 0.95 , summary_ch1 , transform =axs [0]. transAxes ,
+fontsize =10 , verticalalignment =’top ’, bbox = dict (
+boxstyle =’round ’, facecolor =’white ’, alpha =0.5) )
+# Ch2 rise times
+axs [1]. scatter ( range (len( dataSet_2 [’riseTime ’])), np. array (
+dataSet_2 [’riseTime ’], dtype = float )*1 E12)
+axs [1]. set_xlabel (’Number ␣of␣ shots ’)
+axs [1]. set_ylabel (’Time ␣(ps)’)
+axs [1]. set_title (" Rise ␣ times ␣-␣ Output ")
+axs [1]. set_xlim ( left = 0, right = len( dataSet_2 [’riseTime ’]))
+axs [1]. set_ylim (0, 2E3)
+axs [1]. grid ( True )
+# Calculate statistics for Ch2
+mean_ch2 = np. mean ( dataSet_2 [’riseTime ’]) *1 E12
+median_ch2 = np. median ( dataSet_2 [’riseTime ’]) *1 E12
+std_ch2 = np.std ( dataSet_2 [’riseTime ’]) *1 E12
+# Summary box for Ch2
+summary_ch2 = f’Mean :␣{ mean_ch2 :.2f}␣ps\ nMedian :␣{ median_ch2 :.2f
+}␣ps\ nStd ␣Dev:␣{ std_ch2 :.2f}␣ps ’
+axs [1]. text (0.05 , 0.95 , summary_ch2 , transform =axs [1]. transAxes ,
+fontsize =10 , verticalalignment =’top ’, bbox = dict (
+boxstyle =’round ’, facecolor =’white ’, alpha =0.5) )
+plt . suptitle ( fileName )
+plt . show ()
+def maxAmplitudePlot ( dataSet_1 , dataSet_2 , fileName ):
+’’’
+This function plots the maximum amplitude of each shot in a
+dataset . This will allow to see the trend in the captured
+data , identifying particular trends between shots that would
+compromise the analysis . In that sense , te inputs are two
+datasets that are captured for each test (Ch1 measuring the
+input , and Ch2 measuring the output ). Then , plots the maximum
+amplitude for each waveform present in the dataset and
+calculates the corresponding mean , median and standard
+deviation .
+’’’
+fig , axs = plt . subplots (1, 2, figsize =(14 , 6))
+# Ch1 rise times
+axs [0]. scatter ( range (len( dataSet_1 [’amplitude ’]. columns )), np.
+array ([ dataSet_1 [’amplitude ’][ column ]. max () for column in
+dataSet_1 [’amplitude ’]. columns ]))
+axs [0]. set_xlabel (’Number ␣of␣ shots ’)
+axs [0]. set_ylabel (’Amplitude ␣(V)’)
+axs [0]. set_title ("Max␣ Amplitude ␣-␣ DDot ")
+axs [0]. set_xlim (0, len( dataSet_1 [’amplitude ’]. columns ))
+axs [0]. set_ylim ( bottom = 0, top = 14 E3)
+axs [0]. grid ( True )
+# Ch2 rise times
+axs [1]. scatter ( range (len( dataSet_2 [’amplitude ’]. columns )), np.
+array ([ dataSet_2 [’amplitude ’][ column ]. max () for column in
+dataSet_2 [’amplitude ’]. columns ]))
+axs [1]. set_xlabel (’Number ␣of␣ shots ’)
+axs [1]. set_ylabel (’Amplitude ␣(V)’)
+axs [1]. set_title ("Max␣ Amplitude ␣-␣ Output ")
+axs [1]. set_xlim (0, len( dataSet_2 [’amplitude ’]. columns ))
+axs [1]. set_ylim ( bottom = 0, top = 14 E3)
+axs [1]. grid ( True )
+# Calculate statistics for Ch2
+mean_ch2 = np. mean (np. array ([ dataSet_2 [’amplitude ’][ column ]. max
+() for column in dataSet_2 [’amplitude ’]. columns ]))
+median_ch2 = np. median (np. array ([ dataSet_2 [’amplitude ’][ column ].
+max () for column in dataSet_2 [’amplitude ’]. columns ]))
+std_ch2 = np.std (np. array ([ dataSet_2 [’amplitude ’][ column ]. max ()
+for column in dataSet_2 [’amplitude ’]. columns ]))
+# Summary box for Ch2
+summary_ch2 = f’Mean :␣{ mean_ch2 :.2f}␣V\ nMedian :␣{ median_ch2 :.2f}
+␣V\ nStd ␣Dev:␣{ std_ch2 :.2f}␣V’
+axs [1]. text (0.05 , 0.95 , summary_ch2 , transform =axs [1]. transAxes ,
+fontsize =10 , verticalalignment =’top ’, bbox = dict (
+boxstyle =’round ’, facecolor =’white ’, alpha =0.5) )
+plt . suptitle ( fileName )
+plt . show ()
+def amplitudeVsRiseTimePlot ( dataSet_1 , dataSet_2 , fileName ):
+’’’
+This function plots the rise time vs. amplitude of each shot in
+a dataset . This will allow to see the trend in the captured
+data , identifying particular trends between shots that would
+compromise the analysis . In that sense , te inputs are two
+datasets that are captured for each test (Ch1 measuring the
+input , and Ch2 measuring the output ). Then , plots the rise
+time vs. amplitude for each waveform present in the dataset
+and calculates the corresponding mean , median and standard
+deviation .
+’’’
+fig , axs = plt . subplots (1, 2, figsize =(14 , 6))
+# Ch1 rise times
+axs [0]. scatter ( range (len( dataSet_1 [’amplitude ’]. columns )), np.
+array ([ dataSet_1 [’amplitude ’][ column ]. max () for column in
+dataSet_1 [’amplitude ’]. columns ]) /( np. array ( dataSet_1 [’
+riseTime ’], dtype = float )*1 E9))
+axs [0]. set_xlabel (’Number ␣of␣ shots ’)
+axs [0]. set_ylabel (’Amplitude ␣(V)’)
+axs [0]. set_title ("Max␣ Amplitude ␣-␣ DDot ")
+axs [0]. set_xlim (0, len( dataSet_1 [’amplitude ’]. columns ))
+axs [0]. set_ylim ( bottom = 0, top = 30 E3)
+axs [0]. grid ( True )
+# Ch2 rise times
+axs [1]. scatter ( range (len( dataSet_2 [’amplitude ’]. columns )), np.
+array ([ dataSet_2 [’amplitude ’][ column ]. max () for column in
+dataSet_2 [’amplitude ’]. columns ]) /( np. array ( dataSet_2 [’
+riseTime ’], dtype = float )*1 E9))
+axs [1]. set_xlabel (’Number ␣of␣ shots ’)
+axs [1]. set_ylabel (’Amplitude ␣(V)’)
+axs [1]. set_title ("Max␣ Amplitude ␣-␣ Output ")
+axs [1]. set_xlim (0, len( dataSet_2 [’amplitude ’]. columns ))
+axs [1]. set_ylim ( bottom = 0, top = 30 E3)
+axs [1]. grid ( True )
+# Calculate statistics for Ch2
+mean_ch2 = np. mean (np. array ([ dataSet_2 [’amplitude ’][ column ]. max
+() for column in dataSet_2 [’amplitude ’]. columns ]) /1 E3 /( np.
+array ( dataSet_2 [’riseTime ’], dtype = float )*1 E9))
+median_ch2 = np. median (np. array ([ dataSet_2 [’amplitude ’][ column ].
+max () for column in dataSet_2 [’amplitude ’]. columns ]) /1 E3 /( np.
+array ( dataSet_2 [’riseTime ’], dtype = float )*1 E9))
+std_ch2 = np.std (np. array ([ dataSet_2 [’amplitude ’][ column ]. max ()
+for column in dataSet_2 [’amplitude ’]. columns ]) /1 E3 /( np. array (
+dataSet_2 [’riseTime ’], dtype = float )*1 E9))
+# Summary box for Ch2
+summary_ch2 = f’Mean :␣{ mean_ch2 :.2f}␣kV/ns\ nMedian :␣{ median_ch2
+:.2f}␣kV/ns\ nStd ␣Dev:␣{ std_ch2 :.2f}␣kV/ns ’
+axs [1]. text (0.05 , 0.95 , summary_ch2 , transform =axs [1]. transAxes ,
+fontsize =10 , verticalalignment =’top ’, bbox = dict (
+boxstyle =’round ’, facecolor =’white ’, alpha =0.5) )
+plt . suptitle ( fileName )
+plt . show ()
+fig , axs = plt . subplots (1, 2, figsize =(14 , 6))
+# Ch1 rise times
+axs [0]. scatter (( np. array ( dataSet_1 [’riseTime ’], dtype = float )*1 E9
+), np. array ([ dataSet_1 [’amplitude ’][ column ]. max () for column
+in dataSet_1 [’amplitude ’]. columns ]))
+axs [0]. set_xlabel (’Rise ␣ Time ␣[ns]’)
+axs [0]. set_ylabel (’Amplitude ␣(V)’)
+axs [0]. set_title (" Voltage ␣vs.␣ Rise ␣ Time ␣-␣ dDot ")
+axs [0]. grid ( True )
+# Ch2 rise times
+axs [1]. scatter (( np. array ( dataSet_2 [’riseTime ’], dtype = float )*1 E9
+), np. array ([ dataSet_2 [’amplitude ’][ column ]. max () for column
+in dataSet_2 [’amplitude ’]. columns ]))
+axs [1]. set_xlabel (’Rise ␣ Time ␣[ns]’)
+axs [1]. set_ylabel (’Amplitude ␣(V)’)
+axs [1]. set_title (" Voltage ␣vs.␣ Rise ␣ Time ␣-␣ Output ")
+axs [1]. grid ( True )
+plt . suptitle ( fileName )
+plt . show ()
+def medians ( directory ):
+’’’
+The function medians receives a directory where all the datasets
+per test are stored , and then captures information such as
+Filename , Time , Amplitude , Frequency and PSD , and then
+retrieves the median from the dataset for each test . Once the
+medians are obtained , they are overlapped in a single plot
+magnetic field intensity vs. time to observe the differences
+in the results for each test .
+’’’
+median_data = {
+" FileName ": [],
+" Time ": [],
+" Amplitude ": [],
+" Frequency ": [],
+"PSD": []
+}
+for fileName in sorted (os. listdir ( directory )):
+if fileName . endswith (".csv ") and ’Ch2 ’ in fileName :
+file_path = os. path . join ( directory , fileName )
+data = signalProcessing ( file_path , time_window =( -5E -9 ,10
+E -9))
+parameters = data [" parameters "]
+mid_frame_idx = parameters [" FastFrame ␣ Count "] // 2
+median_time = data [" time "][ mid_frame_idx ]. values
+median_amplitude = data [" amplitude "][ mid_frame_idx ].
+values
+freqs = data [’spectrum ’][ ’freqs ’][ mid_frame_idx ]
+psd = data [’spectrum ’][ ’psd ’][ mid_frame_idx ]
+median_data [" FileName "]. append ( fileName )
+median_data [" Time "]. append ( median_time )
+median_data [" Amplitude "]. append ( median_amplitude )
+median_data [" Frequency "]. append ( freqs )
+median_data ["PSD"]. append (psd)
+median_df = pd. DataFrame ( median_data )
+plt . figure ( figsize =(14 , 6))
+plt . subplot (1, 2, 1)
+for i in range (len( median_df )):
+plt . plot ( median_df .loc[i, " Time "], savgol_filter ( median_df .
+loc[i, " Amplitude "], 50, 2) , label = median_df .loc[i, "
+FileName "])
+plt . xlabel (" Time ␣(s)")
+plt . ylabel (" Amplitude ␣(V)")
+plt . title (" Time ␣vs␣ Amplitude ␣( Median ␣ Frames )")
+plt . grid ( True )
+plt . subplot (1, 2, 2)
+for i in range (len( median_df )):
+plt . semilogx ( median_df .loc[i, " Frequency "], median_df .loc[i,
+"PSD"], label = median_df .loc[i, " FileName "])
+plt . xlabel (" Frequency ␣(Hz)")
+plt . xlim ( left = 1E9 , right = 10 E9)
+plt . ylim ( bottom = -100 , top = 0)
+plt . ylabel ("PSD␣(dB)")
+plt . title (" Frequency ␣vs␣ Amplitude ␣( Median ␣ Frames )")
+plt . grid (True , which =" both ", linestyle =" --")
+plt . tight_layout ()
+plt . show ()
+def multi_medians ( directory_c , directory_4 , directory_6 ):
+’’’
+The function medias receives a directory where cotrol , NLTL No.
+04 and NLTL No. 06 datasets are stored , and then captures
+information such as Filename , Time , Amplitude , Frequency and
+PSD , and then retrieves the median from the dataset for each
+test . Once the medians are obtained , they are overlapped in a
+single plot magnetic field intensity vs. time to observe the
+differences in the results between the samples .
+’’’
+median_data_c = {
+" FileName ": [],
+" Time ": [],
+" Amplitude ": [],
+" Frequency ": [],
+"PSD": []
+}
+median_data_4 = {
+" FileName ": [],
+" Time ": [],
+" Amplitude ": [],
+" Frequency ": [],
+"PSD": []
+}
+median_data_6 = {
+" FileName ": [],
+" Time ": [],
+" Amplitude ": [],
+" Frequency ": [],
+"PSD": []
+}
+for fileName in sorted (os. listdir ( directory_c )):
+if fileName . endswith (".csv ") and ’Ch2 ’ in fileName :
+file_path = os. path . join ( directory_c , fileName )
+data = signalProcessing ( file_path , time_window =( -5E -9 ,10
+E -9))
+parameters = data [" parameters "]
+mid_frame_idx = parameters [" FastFrame ␣ Count "] // 2
+median_time = data [" time "][ mid_frame_idx ]. values
+median_amplitude = data [" amplitude "][ mid_frame_idx ].
+values
+freqs = data [’spectrum ’][ ’freqs ’][ mid_frame_idx ]
+psd = data [’spectrum ’][ ’psd ’][ mid_frame_idx ]
+median_data_c [" FileName "]. append ( fileName )
+median_data_c [" Time "]. append ( median_time )
+median_data_c [" Amplitude "]. append ( median_amplitude )
+median_data_c [" Frequency "]. append ( freqs )
+median_data_c ["PSD"]. append (psd)
+median_df_c = pd. DataFrame ( median_data_c )
+for fileName in sorted (os. listdir ( directory_4 )):
+if fileName . endswith (".csv ") and ’Ch2 ’ in fileName :
+file_path = os. path . join ( directory_4 , fileName )
+data = signalProcessing ( file_path , time_window =( -5E -9 ,10
+E -9))
+parameters = data [" parameters "]
+mid_frame_idx = parameters [" FastFrame ␣ Count "] // 2
+median_time = data [" time "][ mid_frame_idx ]. values
+median_amplitude = data [" amplitude "][ mid_frame_idx ].
+values
+freqs = data [’spectrum ’][ ’freqs ’][ mid_frame_idx ]
+psd = data [’spectrum ’][ ’psd ’][ mid_frame_idx ]
+median_data_4 [" FileName "]. append ( fileName )
+median_data_4 [" Time "]. append ( median_time )
+median_data_4 [" Amplitude "]. append ( median_amplitude )
+median_data_4 [" Frequency "]. append ( freqs )
+median_data_4 ["PSD"]. append (psd)
+median_df_4 = pd. DataFrame ( median_data_4 )
+for fileName in sorted (os. listdir ( directory_6 )):
+if fileName . endswith (".csv ") and ’Ch2 ’ in fileName :
+file_path = os. path . join ( directory_6 , fileName )
+data = signalProcessing ( file_path , time_window =( -5E -9 ,10
+E -9))
+parameters = data [" parameters "]
+mid_frame_idx = parameters [" FastFrame ␣ Count "] // 2
+median_time = data [" time "][ mid_frame_idx ]. values
+median_amplitude = data [" amplitude "][ mid_frame_idx ].
+values
+freqs = data [’spectrum ’][ ’freqs ’][ mid_frame_idx ]
+psd = data [’spectrum ’][ ’psd ’][ mid_frame_idx ]
+median_data_6 [" FileName "]. append ( fileName )
+median_data_6 [" Time "]. append ( median_time )
+median_data_6 [" Amplitude "]. append ( median_amplitude )
+median_data_6 [" Frequency "]. append ( freqs )
+median_data_6 ["PSD"]. append (psd)
+median_df_6 = pd. DataFrame ( median_data_6 )
+list_1 = np. arange (0, 4, 0.1) . tolist ()
+list_2 = np. arange (4, 10.5 , 0.5) . tolist ()
+list_3 = [12 , 14]
+currents = list_1 + list_2 + list_3
+l = 48.5e -3
+LL = 1.231040e -3
+D = 17.25e -3
+mu0 = 4* np.pi *1e -7
+A = np.pi *(D/2) **2
+Const = np. sqrt (LL /( mu0*A*l)) *((4* np.pi) /1000)
+Oersted = [ value * Const for value in currents ]
+for i in range (len( median_df_c )):
+if i == 11:
+continue
+plt. figure ( figsize =(14 , 6))
+plt. suptitle (f"{ Oersted [i ]:.3 g}␣Oe", fontsize =16 , fontweight =’
+bold ’)
+plt. subplot (1, 2, 1)
+plt. plot ( median_df_c .loc[i, " Time "]/1E -9, savgol_filter (
+median_df_c .loc[i, " Amplitude "], 50, 2) , label = median_df_c .
+loc [i, " FileName "])
+plt. plot ( median_df_4 .loc[i, " Time "]/1E -9, savgol_filter (
+median_df_4 .loc[i, " Amplitude "], 50, 2) , label = median_df_4 .
+loc [i, " FileName "])
+plt. plot ( median_df_6 .loc[i, " Time "]/1E -9, savgol_filter (
+median_df_6 .loc[i, " Amplitude "], 50, 2) , label = median_df_6 .
+loc [i, " FileName "])
+plt. xlim (np.min( median_df_6 .loc[i, " Time "]) , np.max(
+median_df_6 .loc[i, " Time "]))
+plt. xlabel (" Time ␣(ns)")
+plt. ylabel (" Amplitude ␣(V)")
+plt. xlim ( left = -2, right = 8)
+plt. title (" Time ␣vs␣ Amplitude ␣( Median ␣ Frames )")
+plt. legend ([ ’Control ’,’NLTL ␣4’,’NLTL ␣6’])
+plt. grid ( True )
+plt. subplot (1, 2, 2)
+plt. semilogx ( median_df_c .loc[i, " Frequency "], median_df_c .loc[
+i, "PSD "], label = median_df_c .loc [i, " FileName "])
+plt. semilogx ( median_df_4 .loc[i, " Frequency "], median_df_4 .loc[
+i, "PSD "], label = median_df_4 .loc [i, " FileName "])
+plt. semilogx ( median_df_6 .loc[i, " Frequency "], median_df_6 .loc[
+i, "PSD "], label = median_df_6 .loc [i, " FileName "])
+plt. xlabel (" Frequency ␣(Hz)")
+plt. ylabel ("PSD␣(dB)")
+plt. title (" Frequency ␣vs␣ Amplitude ␣( Median ␣ Frames )")
+plt. legend ([ ’Control ’,’NLTL ␣4’,’NLTL ␣6’])
+plt. grid (True , which =" both ", linestyle =" --")
+plt. xlim ( left = 1E9 , right = 10 E9)
+plt. tight_layout ()
+plt. savefig (f"/ content / drive / MyDrive / Colab ␣ Notebooks /UNM/ NLTL
+/01. ␣ Data /{ Oersted [i ]:.3 g}Oe.png ", dpi = 300)
+plt. show ()
+directory = ’/ content / drive / MyDrive / Colab ␣ Notebooks /UNM/ NLTL /01. ␣
+Data /08. ␣ Test ␣ 2024.08.01 ’
+test = {}
+statistics = []
+for fileName in sorted (os. listdir ( directory )):
+if fileName . endswith (".csv "):
+test [ fileName ] = signalProcessing (os. path . join ( directory ,
+fileName ), time_window = None )
+if ’Ch2 ’ in fileName :
+statistics . append ( signalPlotting ( test [ fileName ], fileName ))
+statistics_df = pd. DataFrame ( statistics )
+directory_c = ’/ content / drive / MyDrive / Colab ␣ Notebooks / UNM/ NLTL /01. ␣
+Data /20. ␣ Test ␣ 2024.12.10 ’
+directory_6 = ’/ content / drive / MyDrive / Colab ␣ Notebooks / UNM/ NLTL /01. ␣
+Data /21. ␣ Test ␣ 2024.12.10 ’
+directory_4 = ’/ content / drive / MyDrive / Colab ␣ Notebooks / UNM/ NLTL /01. ␣
+Data /22. ␣ Test ␣ 2024.12.10 ’
+multi_medians ( directory_c , directory_4 , directory_6 )
