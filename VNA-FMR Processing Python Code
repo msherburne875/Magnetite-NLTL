@@ -882,45 +882,60 @@ SusM15 = smtable [0][ ’M’]
 SusM64 = smtable [1][ ’M’]
 SusM85 = smtable [2][ ’M’]
 ## SLICE AND UBERMAG
+
 # Each slice
 SliceValues = -1 * SV15
-maxSlice = max( SliceValues ) #
-array is 10001 values long
-compS15 = SliceValues / maxSlice
+linear = 10 ** (SliceValues / 10.0)
+maxSlice = max(linear)                                    # array is 10001 values long
+compS15 = linear/maxSlice
+
 SliceValues = -1 * SV64
-maxSlice = max( SliceValues ) #
-array is 10001 values long
-compS64 = SliceValues / maxSlice
+linear = 10 ** (SliceValues / 10.0)
+maxSlice = max(linear)                                    # array is 10001 values long
+compS64 = linear/maxSlice
+
 SliceValues = -1 * SV85
-maxSlice = max( SliceValues ) #
-array is 10001 values long
-compS85 = SliceValues / maxSlice
+linear = 10 ** (SliceValues / 10.0)
+maxSlice = max(linear)                                    # array is 10001 values long
+compS85 = linear/maxSlice
+
 # Real models for each slice
-RealArray = np. real ( SusM15 )
-maxReal = max ( RealArray ) #
-array is 1001 values long
-compRealS15 = RealArray / maxReal
-RealArray = np. real ( SusM64 )
-maxReal = max ( RealArray ) #
-array is 1001 values long
-compRealS64 = RealArray / maxReal
-RealArray = np. real ( SusM85 )
-maxReal = max ( RealArray ) #
-array is 1001 values long
-compRealS85 = RealArray / maxReal
+#Modified for dB -> Linear -> dB
+RealArray = np.real(SusM15)
+#linear = 10 ** (RealArray / 10.0)
+#maxReal = max(linear)                                       # array is 1001 values long
+maxReal = max(RealArray)                                       # array is 1001 values long
+compRealS15 = RealArray/maxReal
+
+RealArray = np.real(SusM64)
+maxReal = max(RealArray)                                       # array is 1001 values long
+compRealS64 = RealArray/maxReal
+#linear = 10 ** (RealArray / 10.0)
+#maxReal = max(linear)                                       # array is 1001 values long
+#maxReal = max(RealArray)                                       # array is 1001 values long
+#compRealS64 = linear/maxReal
+
+RealArray = np.real(SusM85)
+maxReal = max(RealArray)                                       # array is 1001 values long
+compRealS85 = RealArray/maxReal
+#linear = 10 ** (RealArray / 10.0)
+#maxReal = max(linear)                                       # array is 1001 values long
+#maxReal = max(RealArray)                                       # array is 1001 values long
+#compRealS85 = linear/maxReal
+
 # Imganinary models for each slice
-ImgArray = -1* np. imag ( SusM15 )
-maxImg = max( ImgArray ) #
-array is 1001 values long
-compImgS15 = ImgArray / maxImg
-ImgArray = -1* np. imag ( SusM64 )
-maxImg = max( ImgArray ) #
-array is 1001 values long
-compImgS64 = ImgArray / maxImg
-ImgArray = -1* np. imag ( SusM85 )
-maxImg = max( ImgArray ) #
-array is 1001 values long
-compImgS85 = ImgArray / maxImg
+ImgArray = -1*np.imag(SusM15)
+maxImg = max(ImgArray)                                         # array is 1001 values long
+compImgS15 = ImgArray/maxImg
+
+ImgArray = -1*np.imag(SusM64)
+maxImg = max(ImgArray)                                         # array is 1001 values long
+compImgS64 = ImgArray/maxImg
+
+ImgArray = -1*np.imag(SusM85)
+maxImg = max(ImgArray)                                         # array is 1001 values long
+compImgS85 = ImgArray/maxImg
+
 # comparableSlice15 - comparableRealS15 and comparableImgS15
 # comparableSlice64 - comparableRealS64 and comparableImgS64
 # comparableSlice85 - comparableRealS85 and comparableImgS85
@@ -990,14 +1005,14 @@ Line2D ([0] , [0] , color =" blue ", linestyle = " dashed ")
 Line2D ([0] , [0] , color =" blue ", linestyle = " dashdot "
 )]
 plt . legend ( custom_lines , ["$\ Delta ␣S_ {21} $␣-␣180 Oe",
-"$\chi ’’$␣ FDTD ␣-␣180 Oe",
 "$\chi ’$␣ FDTD ␣-␣180 Oe",
+"$\chi ’'$␣ FDTD ␣-␣180 Oe",
 "$\ Delta ␣S_ {21} $␣-␣750 Oe",
-"$\chi ’’$␣ FDTD ␣-␣750 Oe",
 "$\chi ’$␣ FDTD ␣-␣750 Oe",
+"$\chi ’'$␣ FDTD ␣-␣750 Oe",
 "$\ Delta ␣S_ {21} $␣-␣ 1000 Oe",
-"$\chi ’’$␣ FDTD ␣-␣ 1000 Oe",
-"$\chi ’$␣ FDTD ␣-␣ 1000 Oe"],
+"$\chi ’$␣ FDTD ␣-␣ 1000 Oe",
+"$\chi ’'$␣ FDTD ␣-␣ 1000 Oe"],
 ncols =2)
 #ax. legend ([ line1 , line2 , line3 ], [’ label1 ’, ’label2 ’, ’label3 ’])
 > what above is doing
