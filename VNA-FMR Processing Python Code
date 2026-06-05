@@ -407,7 +407,7 @@ the_plot = ax. plot_surface (( np. divide (Xcon , 1000) ), (np. divide (Ycon ,
 1000000000) ), trans_S21Control , cmap = cc_cmap )
 # Labeling plot
 cbr = fig. colorbar ( the_plot )#, label = )
-cbr . set_label (’$|\ Delta ␣S_ {21}| ␣(dB)$’, fontsize = 13, labelpad =
+cbr . set_label (’$\ Delta ␣S_ {21} ␣(dB)$’, fontsize = 13, labelpad =
 12)
 plt . xlabel (’Magnetic ␣ Field ␣(kOe)’, fontsize = 15, labelpad = 20)
 ax. set_xlim (0, 1)
@@ -490,7 +490,7 @@ the_plot = ax. contourf (X, Y, smd_S21Test , levels = 1000 , cmap =
 cc_cmap ) #, colormap_levels
 # Colorbar and labeling
 cbr = fig. colorbar ( the_plot )
-cbr . set_label (’$|\ Delta ␣S_ {21}| ␣(dB)$’, fontsize = 26, labelpad =
+cbr . set_label (’$\ Delta ␣S_ {21} ␣(dB)$’, fontsize = 26, labelpad =
 12)
 cbr .ax. tick_params ( labelsize = 15, pad = 6)
 plt . xlabel (’Magnetic ␣ Field ␣(kOe)’, fontsize = 30, labelpad = 20)
@@ -520,7 +520,7 @@ ax = plt . axes ( projection = ’3d’)
 the_plot = ax. plot_surface (X2 , Y2 , newS21 , cmap = cc_cmap )
 # columns have names 7600 -10001
 cbr = fig. colorbar ( the_plot )
-cbr . set_label (’$|\ Delta ␣S_ {21}| ␣(dB)$’, labelpad = 16)
+cbr . set_label (’$\ Delta ␣S_ {21} ␣(dB)$’, labelpad = 16)
 plt . xlabel (’Magnetic ␣ Field ␣(Oe)’, fontsize = 15, labelpad = 20)
 #in Oe because other plot divided by
 1000
